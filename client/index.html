@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>client2</title>
+  <style>
+    #page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      row-gap: 20px;
+      width: 100vw;
+      height: 100vh;
+      background: url("./bgc.png");
+      background-size: cover;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="page">
+    <div style="width:300px">
+      <div class="layui-progress">
+        <div class="layui-progress-bar" lay-percent="50%" data-action="upload-progress"></div>
+      </div>
+    </div>
+    <button type="button" class="layui-btn" data-action="upload-btn">
+      <i class="layui-icon">&#xe67c;</i>上传图片
+    </button>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
