@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLS 500ms 豁免机制演示</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      padding: 30px 20px;
+    }
+    #app {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    h2 {
+      margin-bottom: 10px;
+      font-size: 20px;
+    }
+    .desc {
+      color: #555;
+      margin-bottom: 20px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    button {
+      padding: 10px 24px;
+      font-size: 15px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    button:active { opacity: .8; }
+    .btn-fast { background: #22c55e; color: #fff; }
+    .btn-slow { background: #ef4444; color: #fff; }
+    .btn-clear { background: #6b7280; color: #fff; }
+
+    /* 动态插入区域 */
+    .insert-box {
+      min-height: 40px;
+      background: #e5e7eb;
+      border: 2px dashed #9ca3af;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6b7280;
+      font-size: 14px;
+      margin-bottom: 0;
+    }
+    .insert-box .red-block {
+      background: #ef4444;
+      height: 200px;
+      width: 100%;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    /* 偏移目标——插入元素下方被推动的文字 */
+    .shift-target {
+      padding: 40px 20px;
+      background: #fff;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      text-align: center;
+      font-size: 16px;
+      color: #374151;
+    }
+
+    /* 日志面板 */
+    .log-panel {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: "Cascadia Code", "Fira Code", monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      max-height: 360px;
+      overflow-y: auto;
+    }
+    .log-panel .entry {
+      border-bottom: 1px solid #333;
+      padding: 6px 0;
+    }
+    .log-panel .entry:last-child { border-bottom: none; }
+    .exempt   { color: #22c55e; }
+    .counted  { color: #ef4444; }
+    .muted    { color: #9ca3af; }
+    .label    { color: #facc15; }
+    .summary {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 2px solid #555;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+<div id="app">
+  <h2>📐 CLS 500ms 豁免机制 — 实证演示</h2>
+  <p class="desc">
+    根据 Web Vitals 规范：用户交互后 <strong>500ms</strong> 内的布局偏移不计入 CLS（<code>hadRecentInput = true</code>）。<br>
+    点击「快速插入」：同步插入 → 偏移发生在交互后 ≈0ms → <span class="exempt">豁免</span>。<br>
+    点击「慢速插入」：延迟 600ms → 偏移发生在交互后 &gt;500ms → <span class="counted">计入 CLS</span>。
+  </p>
+
+  <div class="btn-group">
+    <button class="btn-fast" @click="insertFast">⚡ 快速插入 (&lt;500ms)</button>
+    <button class="btn-slow" @click="insertSlow">⏱️ 慢速插入 (&gt;500ms)</button>
+    <button class="btn-clear" @click="clearAll">🗑️ 清空</button>
+  </div>
+
+  <!-- 动态插入容器 -->
+  <div class="insert-box" ref="insertBox">
+    <template v-if="hasBlock">
+      <div class="red-block" :key="blockKey">🔴 动态插入 (200px)</div>
+    </template>
+    <template v-else>
+      暂无动态内容 — 点击上方按钮插入
+    </template>
+  </div>
+
+  <!-- 偏移目标：会被上方插入的内容推下去 -->
+  <div class="shift-target" ref="shiftTarget">
+    📍 <strong>偏移目标区域</strong> — 当上方插入 200px 红色方块时，我会被向下推移。
+  </div>
+
+  <!-- 实时日志 -->
+  <div class="log-panel" ref="logPanel">
+    <div v-if="logs.length === 0" class="muted">等待 layout-shift 事件…</div>
+    <div v-for="(log, i) in logs" :key="i" class="entry">
+      <span class="label">#{{ i + 1 }}</span>
+      <span> value = <strong>{{ log.value.toFixed(4) }}</strong></span>
+      <span> | hadRecentInput = <strong>{{ log.hadRecentInput }}</strong></span>
+      <span> → <strong :class="log.counted ? 'counted' : 'exempt'">{{ log.counted ? '✅ 计入 CLS' : '🚫 豁免 (不计入)' }}</strong></span>
+      <br><span class="muted">   {{ log.time }}</span>
+    </div>
+    <div v-if="summary" class="summary">
+      累计 CLS: {{ summary.toFixed(4) }}
+    </div>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, nextTick, onMounted } = Vue
+
+createApp({
+  setup() {
+    const hasBlock  = ref(false)
+    const blockKey  = ref(0)
+    const logs      = ref([])
+    const summary   = ref(0)
+    const insertBox = ref(null)
+
+    let observer = null
+    let clickTime = 0
+
+    /* ---- 工具 ---- */
+    function now() {
+      return new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    }
+
+    function clearBlock() {
+      hasBlock.value = false
+    }
+
+    function insertBlock() {
+      // 清空再插入（切换 key 保证 DOM 重新挂载，触发 layout-shift）
+      hasBlock.value = false
+      nextTick(() => {
+        blockKey.value++
+        hasBlock.value = true
+      })
+    }
+
+    /* ---- 操作 ---- */
+    function insertFast() {
+      clearBlock()
+      nextTick(() => {
+        clickTime = performance.now()
+        insertBlock()
+      })
+    }
+
+    function insertSlow() {
+      clearBlock()
+      nextTick(() => {
+        clickTime = performance.now()
+        setTimeout(() => {
+          insertBlock()
+        }, 600)
+      })
+    }
+
+    function clearAll() {
+      clearBlock()
+      logs.value = []
+      summary.value = 0
+    }
+
+    /* ---- PerformanceObserver ---- */
+    onMounted(() => {
+      if (!window.PerformanceObserver) {
+        logs.value.push({
+          value: 0, hadRecentInput: false, counted: false,
+          time: 'PerformanceObserver 不可用'
+        })
+        return
+      }
+
+      observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          // 只关心 layout-shift
+          if (entry.entryType !== 'layout-shift') continue
+
+          // 过滤掉值为 0 的微小偏移（初始渲染噪音）
+          if (entry.value < 0.001) continue
+
+          const counted = !entry.hadRecentInput
+          const elapsed = clickTime ? `${(entry.startTime - clickTime).toFixed(0)}ms` : 'N/A'
+
+          logs.value.push({
+            value: entry.value,
+            hadRecentInput: entry.hadRecentInput,
+            counted,
+            time: `startTime=${entry.startTime.toFixed(0)}ms | 距点击=${elapsed} | ${now()}`
+          })
+
+          if (counted) {
+            summary.value += entry.value
+          }
+
+          clickTime = 0
+        }
+      })
+
+      observer.observe({ type: 'layout-shift', buffered: true })
+    })
+
+    return {
+      hasBlock, blockKey, logs, summary, insertBox,
+      insertFast, insertSlow, clearAll
+    }
+  }
+}).mount('#app')
+</script>
+
+</body>
+</html>
